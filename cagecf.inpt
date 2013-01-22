@@ -1,0 +1,14 @@
+3           Number of species
+300         Number of ions of species 1.
+75          Number of ions of species 2.
+75          Number of ions of species 2.
+20          N(skip)
+34.664652660386359 Taille de boite (UA)
+1           How many files to be read from?
+./positions.out
+10000       Number of coordinate sets in file 1.
+1000        Time-span of the correlation function (in steps)
+5.98d0      cutoff for bond
+1           number of ions for change in cage
+41.341d0    MD timestep
+10          number of configs between MD dumps
