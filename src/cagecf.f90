@@ -1,3 +1,8 @@
+! This program computes the cage correlation function as defined in
+! XX
+! Original program by Mathieu Salanne
+! Rewritten in fortran 2008 with improved performance by Maximilien Levesque
+
 MODULE MYMOD
 double precision, allocatable, dimension(:) :: x, y, z
 double precision :: cutoff, width
@@ -11,7 +16,7 @@ integer :: nrun,npereng,nstep,npervel,nperfri,nskip
 integer :: num, ncut
 integer :: nspecies, ncoordav,ntot
 integer, allocatable, dimension(:,:) :: ncfin, ncfout, nthetainout, nthetaout, norm
-integer(kind=1), allocatable, dimension(:,:,:) :: istorederfunc
+integer(kind=1), allocatable, dimension(:,:,:) :: istorederfunc ! kind=1 really improves performance cause derfunc only contains 0 or 1.
 END MODULE MYMOD
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -144,42 +149,33 @@ double precision :: xi, yi, zi, dx, dy, dz, dr
 integer(kind=1) :: t_istorederfunc_ncorrtime, t_istorederfunc_m, t_mult
 integer(kind=1), allocatable, dimension(:,:) :: i_istorederfunc
 
+derfunc = 0 ! init
 
-!allocate( derfunc(nummax,nummax), source=0 )
-derfunc = 0
+imin=nion(1)+1
+imax=nion(1)+nion(2)
+kmin=1
+kmax=nion(1)
 
-! main loop
-do i=1+nion(1),nion(1)+nion(2)
-  xi=x(i)
-  yi=y(i)
-  zi=z(i)
+do i=imin,imax
+  xi=x(i) ; yi=y(i) ; zi=z(i)
 
-  do j=1,nion(1)
-    ! calculation of error function values
-    dx=xi-x(j)
-    dy=yi-y(j)
-    dz=zi-z(j)
+  do k=kmin,kmax
+    dx=xi-x(k) ; dy=yi-y(k) ; dz=zi-z(k)
     ! apply minimum image convention
     dx=dx-boxlen*int(dx*halfboxrec)
     dy=dy-boxlen*int(dy*halfboxrec)
     dz=dz-boxlen*int(dz*halfboxrec)
     dr = norm2((/dx,dy,dz/))
     if( dr <= cutoff ) then
-      nerfc = 1
+      derfunc(i,k) = 1
       ncoordav = ncoordav+1
     else
-      nerfc = 0
+      derfunc(i,k) = 0
     endif
-    derfunc(i,j) = nerfc
   end do
 
 end do
 
-
-imin=nion(1)+1
-imax=nion(1)+nion(2)
-kmin=1
-kmax=nion(1)
 mmin=1
 mmax=ncorrtime
 
@@ -207,8 +203,7 @@ do i=imin,imax
      end do
 
      if ((ncfout(i,nt))<ncut) nthetaout(i,nt)=nthetaout(i,nt)+1
-
-     if (((ncfin(i,nt))<ncut).and.((ncfout(i,nt))<ncut)) nthetainout(i,nt)=nthetainout(i,nt)+1
+     if (((ncfin(i,nt))<ncut).and.((ncfout(i,nt))<ncut)) nthetainout(i,nt)=nthetainout(i,nt) +1
 
    end do
 end do
@@ -234,13 +229,12 @@ if (ncorrcall > ncorr) then
         ncfin(i,nt)=ncfin(i,nt) + t_istorederfunc_ncorrtime**2 - t_mult
       end do
 
-      if ((ncfout(i,nt)).lt.ncut) nthetaout(i,nt)=nthetaout(i,nt)+1
-      if (((ncfin(i,nt)).lt.ncut).and. ((ncfout(i,nt)).lt.ncut)) nthetainout(i,nt)=nthetainout(i,nt)+1
+      if ((ncfout(i,nt))<ncut) nthetaout(i,nt)=nthetaout(i,nt)+1
+      if (((ncfin(i,nt))<ncut) .and. ((ncfout(i,nt))<ncut)) nthetainout(i,nt)=nthetainout(i,nt)+1
     end do
   end do
 endif
 
-! array pointers are updated in dipreform
 END SUBROUTINE IRCFCALC
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -250,14 +244,14 @@ use mymod
 implicit none
 double precision, allocatable, dimension(:) :: cfinouttot, cfouttot
 integer :: i, j, ns
-double precision :: coordav, time
+double precision :: coordav, time, t_norm
 
 allocate( cfinouttot(nspecies) )
 allocate( cfouttot(nspecies) )
 coordav=dble(ncoordav*nskip)/dble(ntot*nion(2))
 
-open (60,file='cfinout_cat1an.dat')
-open (61,file='cfout_cat1an.dat')
+open (60,file='cagecfinout.dat')
+open (61,file='cagecfout.dat')
 
 do j=0,ncorr-1
 
@@ -266,8 +260,11 @@ do j=0,ncorr-1
 
   do i=nion(1)+1,nion(1)+nion(2)
     ns=ntype(i)
-    cfouttot(ns)=cfouttot(ns)+float(nthetaout(i,j)) /(float(norm(i,j)))
-    cfinouttot(ns)=cfinouttot(ns)+float(nthetainout(i,j)) /(float(norm(i,j)))
+    t_norm = dble(norm(i,j))
+    if( t_norm/=0 ) then
+      cfouttot(ns)=cfouttot(ns)+dble(nthetaout(i,j)) / t_norm
+      cfinouttot(ns)=cfinouttot(ns)+dble(nthetainout(i,j)) / t_norm
+    end if
   end do
 
   time=dble(j)*dble(nskip)*dble(ndump)*dtime*2.418d-5
@@ -282,12 +279,11 @@ end do
 print*,
 print*, 'Average coordination no. is',coordav
 print*,
-print*, '**** Finished correlation functions written out ****'
+print*, '**** Finished. Correlation functions written in ****'
+print*, 'cagecfout.dat   and   cagecfinout.dat'
+print*,
 print*,
 
 END SUBROUTINE IRCFDUMP
-
-
-
 
 END PROGRAM CAGECF
