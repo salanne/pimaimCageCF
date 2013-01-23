@@ -8,6 +8,7 @@ double precision, allocatable, dimension(:) :: x, y, z
 double precision :: cutoff, width
 double precision :: boxlen, halfbox, halfboxrec
 double precision :: dtime, ndump
+integer(1), dimension(:,:), allocatable :: derfunc
 integer, dimension(:), allocatable :: ntype
 integer, dimension(:), allocatable :: nfilecf
 integer, dimension(:), allocatable :: nion
@@ -16,7 +17,7 @@ integer :: nrun,npereng,nstep,npervel,nperfri,nskip
 integer :: num, ncut
 integer :: nspecies, ncoordav,ntot
 integer, allocatable, dimension(:,:) :: ncfin, ncfout, nthetainout, nthetaout, norm
-integer(kind=1), allocatable, dimension(:,:,:) :: istorederfunc ! kind=1 really improves performance cause derfunc only contains 0 or 1.
+integer(1), allocatable, dimension(:,:,:) :: istorederfunc ! kind=1 really improves performance cause derfunc only contains 0 or 1.
 END MODULE MYMOD
 
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -143,18 +144,21 @@ CONTAINS
 SUBROUTINE IRCFCALC
 use mymod
 implicit none
-integer(kind=1), dimension(nummax,nummax) :: derfunc
-integer :: i, j, m, nerfc, nt, imin, imax, kmin,kmax,mmin,mmax
+integer :: i, m, nt, imin, imax, kmin,kmax,mmin,mmax
 double precision :: xi, yi, zi, dx, dy, dz, dr
-integer(kind=1) :: t_istorederfunc_ncorrtime, t_istorederfunc_m, t_mult
-integer(kind=1), allocatable, dimension(:,:) :: i_istorederfunc
+integer(1) :: t_istorederfunc_ncorrtime, t_istorederfunc_m, t_mult
+integer(1), allocatable, dimension(:,:) :: i_istorederfunc
+integer :: tmp_ncfout_i_nt, tmp_ncfin_i_nt
 
-derfunc = 0 ! init
-
+!derfunc = 0 ! init
 imin=nion(1)+1
 imax=nion(1)+nion(2)
 kmin=1
 kmax=nion(1)
+
+!allocate(derfunc(imin:imax,kmin:kmax), )
+if(.not.allocated(derfunc)) allocate(derfunc(imin:imax,kmin:kmax))
+derfunc=0
 
 do i=imin,imax
   xi=x(i) ; yi=y(i) ; zi=z(i)
@@ -190,17 +194,21 @@ do i=imin,imax
   do m=mmin,mmax
     nt=ncorrtime-m
     norm(i,nt)=norm(i,nt)+1
-    ncfout(i,nt)=0
-    ncfin(i,nt)=0
-    
+    tmp_ncfout_i_nt = 0
+    tmp_ncfin_i_nt = 0
+
     do k=kmin,kmax
       t_istorederfunc_ncorrtime = derfunc(i,k) ! seems wierd but is correct
       t_istorederfunc_m = i_istorederfunc(k,m)
       t_mult = t_istorederfunc_ncorrtime * t_istorederfunc_m
       ! Auto-correlation terms.
-      ncfout(i,nt) = ncfout(i,nt) + t_istorederfunc_m**2 - t_mult
-      ncfin(i,nt)  = ncfin(i,nt)  + t_istorederfunc_ncorrtime**2 - t_mult
+      tmp_ncfout_i_nt = tmp_ncfout_i_nt + t_istorederfunc_m**2 - t_mult
+      tmp_ncfin_i_nt = tmp_ncfin_i_nt  + t_istorederfunc_ncorrtime**2 - t_mult
+!      ncfout(i,nt) = ncfout(i,nt) + t_istorederfunc_m**2 - t_mult
+!      ncfin(i,nt)  = ncfin(i,nt)  + t_istorederfunc_ncorrtime**2 - t_mult
      end do
+     ncfout(i,nt) = tmp_ncfout_i_nt
+     ncfin(i,nt) = tmp_ncfin_i_nt
 
      if ((ncfout(i,nt))<ncut) nthetaout(i,nt)=nthetaout(i,nt)+1
      if (((ncfin(i,nt))<ncut).and.((ncfout(i,nt))<ncut)) nthetainout(i,nt)=nthetainout(i,nt) +1
