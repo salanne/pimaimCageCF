@@ -1,0 +1,13 @@
+2           Number of species, 2 for B, O
+480         Number of ions of species 1. (B)
+320         Number of ions of species 2. (O)
+50          N(skip)
+43.659      Size of the cubic cell in Bohr (u.a.) i.e. in the natural unit of PIMAIM. May be found by a simple tail -n3 restart.dat
+1           How many files to be read from? pimaimCageCF should work with several position files, but it is not tested yet.
+../AXELLE/run1/positions.out
+5000        Number of coordinate sets in file 1. If you have a MD of 1000000 steps of 41.341 a.u (ie you simulate 1ns) and print velocities every 10 steps, you have 100000 sets of coorinates in the file containing velocities.
+100         Time-span of the correlation function (in steps) You decide to compute your cage correlation function of how many MD steps ?
+3.5d0       cutoff for bond. First a first coordination shell cage correlation function, give the distance to the first minimum in the radial distribution fun.
+1           number of ions for change in cage
+41.341d0    MD timestep. The one introduced in runtime.inpt. Should be 41.341 if your MD step is 1femtosecond.
+1000        number of configs between MD dumps. Called "Number of steps inbetween periodic output (velocities etc)." in runtime.inpt

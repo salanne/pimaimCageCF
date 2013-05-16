@@ -8,6 +8,14 @@ Aim
 
 The aim of pimaimCageCF is to compute the so called cage correlation functions from molecular dynamics simulations using the code PIMAIM.
 
+Installation
+============
+
+Compilation is very easy using SCONS. It is a better and easier-to-use __make__. You will most certainly find SCONS in the repositories of your Linux distribution. If you use MacOSX, then I have no idea if you'll find it or not. Please let me now.
+Once SCONS is installed, just type in your terminal :
+``
+$ scons
+``
 
 Licence
 =======
