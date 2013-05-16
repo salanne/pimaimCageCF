@@ -7,7 +7,7 @@ MODULE MYMOD
     implicit none
     real(dp), allocatable, dimension(:) :: x, y, z
     real(dp) :: cutoff, width
-    real(dp) :: boxlen, halfbox, halfboxrec
+    real(dp) :: boxlen
     real(dp) :: dtime, ndump
     integer(1), dimension(:,:), allocatable :: derfunc
     integer, dimension(:), allocatable :: ntype
@@ -27,74 +27,19 @@ PROGRAM CAGECF
     use iso_fortran_env, only: dp => real64
     implicit none
 
-    integer :: nummax, nspmax, nfiles, ncnt, nfilecnt
+    integer :: nummax, nfiles, ncnt, nfilecnt
     character(len=80), allocatable, dimension(:) :: posfile
     integer :: i, j, k
-    double precision :: du
+    
+    call checkInputFileExists( "cagecf.inpt")
+    call openInputFile
+    call readInputFile
+    call closeInputFile
+!~     call testInputFile
 
     ncoordav = 0
-    open(10,file='cagecf.inpt',status='old')
-    read(10,*) nspecies
-    if( nspecies < 1 ) stop 'nspecies should be higher than 0'
-    allocate( nion(nspecies) )
-    nspmax = nspecies
-
-    ! read number of atoms of each species
-    do i=1,nspecies
-        read(10,*) nion(i)
-        if( nion(i)<1 ) stop 'nb of ions should be >0 for all ions'
-    end do
-
-    ! allocate accordingly
-    nummax = sum(nion)
-    allocate( x(nummax), y(nummax), z(nummax) ) ! coordinates of all atoms
-    allocate( ntype(nummax) ) ! nummax is the total number of ions in the simulation box
-
-    ! fullfill the type of each atom in the box
-    num=0
-    do i=1,nspecies
-        do j=num+1,num+nion(i)
-            ntype(j)=i
-        end do
-        num=num+nion(i)
-    end do
-
-    read(10,*)nskip
-    if( nskip < 1) stop 'nskip should be > 0'
-    read(10,*)boxlen
-    if( boxlen < 0. ) stop 'box length should be positive'
-    read(10,*)nfiles ! number of position files
-    if( nfiles < 1 ) stop 'nb of position files should be >=1'
-
-    allocate( posfile(nfiles), nfilecf(nfiles) )
-
-    do i=1,nfiles
-        read(10,'(a)')posfile(i)
-        read(10,*)nfilecf(i)
-    end do
-
-    read(10,*)ncorr ! Time-span of the correlation function (in steps)
-    allocate( istorederfunc(nummax,nummax,ncorr) )
-    allocate( ncfin(nummax,0:ncorr) )
-    allocate( ncfout(nummax,0:ncorr) )
-    allocate( nthetainout(nummax,0:ncorr) )
-    allocate( nthetaout(nummax,0:ncorr) )
-    allocate( norm(nummax,0:ncorr) )
-    
-
-    read(10,*)cutoff ! cutoff for bond
-    read(10,*)ncut ! number of ions for change in cage
-    read(10,*)dtime ! MD timestep
-    read(10,*)ndump ! number of configs between MD dumps
-
-    close(10)
-
-    ! Auxillary variables.
     ncorrtime=1
     ncorrcall=0
-
-    halfbox = boxlen/2.0d0
-    halfboxrec = 1.0d0/halfbox
 
     ntot = sum(nfilecf)
     ncnt = 0
@@ -103,7 +48,8 @@ PROGRAM CAGECF
     open(10,file=posfile(1),status='old')
 
     loopj: do j=1,ntot
-        print*, j
+        call tellUserHowItAdvances (j, ntot)
+
         if ((mod(j,nskip))==0) then
             do k=1,nummax
                 read(10,*) x(k), y(k), z(k)
@@ -112,12 +58,12 @@ PROGRAM CAGECF
             ncorrtime = mod(ncorrtime,ncorr)
             ncorrcall = ncorrcall+1
             ncorrtime = ncorrtime+1
-            ncnt=ncnt+1
+            ncnt = ncnt+1
         else
             do k=1,nummax
-                read(10,*)du,du,du
+                read(10,*)
             end do
-            ncnt=ncnt+1
+            ncnt = ncnt+1
         endif
 
         if (ncnt == nfilecf(nfilecnt)) then
@@ -128,8 +74,8 @@ PROGRAM CAGECF
             ncnt = 1
         endif
     end do loopj
+    
     deallocate(istorederfunc, ncfin, ncfout, x, y, z)
-
     call ircfdump
 
     CONTAINS
@@ -162,9 +108,9 @@ PROGRAM CAGECF
                 do k=kmin,kmax
                     dx=xi-x(k) ; dy=yi-y(k) ; dz=zi-z(k)
                     ! apply minimum image convention
-                    dx=dx-boxlen*int(dx*halfboxrec)
-                    dy=dy-boxlen*int(dy*halfboxrec)
-                    dz=dz-boxlen*int(dz*halfboxrec)
+                    dx=dx-boxlen*int(dx*2.0d0/boxlen)
+                    dy=dy-boxlen*int(dy*2.0d0/boxlen)
+                    dz=dz-boxlen*int(dz*2.0d0/boxlen)
                     dr = norm2((/dx,dy,dz/))
                     if( dr <= cutoff ) then
                         derfunc(i,k) = 1
@@ -273,6 +219,90 @@ PROGRAM CAGECF
             print*,
             print*,
 
+        END SUBROUTINE
+
+        SUBROUTINE checkInputFileExists( filename)
+            character(*), intent(in) :: filename
+            logical :: isOK
+            inquire (file=filename, exist=isOK)
+            if (.not. isOK) stop "STOP. Input file called cagecf.inpt not found."
+        END SUBROUTINE
+        
+        SUBROUTINE openInputFile
+            character(*), parameter :: inputFilename = 'cagecf.inpt' ! historical name
+            open(10, file=inputFilename)
+        END SUBROUTINE
+        
+        SUBROUTINE readInputFile
+            read(10,*) nspecies ! number of species
+            if( nspecies < 1 ) stop 'STOP. nspecies should be higher than 0'
+            allocate( nion(nspecies) )
+        
+            ! read number of atoms of each species
+            do i= 1, size(nion)
+                read(10,*) nion(i)
+                if( nion(i)<1 ) stop 'STOP. nb of ions should be >0 for all ions'
+            end do
+        
+            ! allocate accordingly
+            nummax = sum(nion)
+            allocate( x(nummax), y(nummax), z(nummax) ) ! coordinates of all atoms
+            allocate( ntype(nummax) ) ! nummax is the total number of ions in the simulation box
+        
+            ! fullfill the type of each atom in the box
+            num=0
+            do i=1,nspecies
+                do j=num+1,num+nion(i)
+                    ntype(j)=i
+                end do
+                num=num+nion(i)
+            end do
+        
+            read(10,*)nskip
+            if( nskip < 1) stop 'STOP. nskip should be > 0'
+            read(10,*)boxlen
+            if( boxlen <= 0. ) stop 'STOP. box length should be strictly positive'
+            read(10,*)nfiles ! number of position files
+            if( nfiles < 1 ) stop 'STOP. nb of position files should be >=1'
+        
+            allocate( posfile(nfiles), nfilecf(nfiles) )
+        
+            do i=1,nfiles
+                read(10,'(a)')posfile(i)
+                read(10,*)nfilecf(i)
+            end do
+        
+            read(10,*)ncorr ! Time-span of the correlation function (in steps)
+            allocate( istorederfunc(nummax,nummax,ncorr) )
+            allocate( ncfin(nummax,0:ncorr) )
+            allocate( ncfout(nummax,0:ncorr) )
+            allocate( nthetainout(nummax,0:ncorr) )
+            allocate( nthetaout(nummax,0:ncorr) )
+            allocate( norm(nummax,0:ncorr) )
+
+            read(10,*)cutoff ! cutoff for bond
+            read(10,*)ncut ! number of ions for change in cage
+            read(10,*)dtime ! MD timestep
+            read(10,*)ndump ! number of configs between MD dumps
+        END SUBROUTINE
+        
+        SUBROUTINE closeInputFile
+            close(10)
+        END SUBROUTINE
+
+        SUBROUTINE tellUserHowItAdvances (j,maxi)
+            integer, intent(in) :: j, maxi
+            call eraserStandardOutputLastCharacters(100)
+            write(*,'(a,i10,a,i10)',advance='no')'step',j,' /',maxi
+            if( j == maxi ) call eraserStandardOutputLastCharacters(100)
+        END SUBROUTINE
+        
+        SUBROUTINE eraserStandardOutputLastCharacters (imax) ! erase the last imax characters in the standard output (terminal) in the current line
+            integer, intent(in) :: imax
+            integer :: i
+            do i = 1, imax
+                write(*,'(a)',advance='no')8
+            end do
         END SUBROUTINE
 
 END PROGRAM
