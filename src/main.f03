@@ -11,7 +11,6 @@ MODULE MYMOD
     real(dp) :: dtime, ndump
     integer(1), dimension(:,:), allocatable :: derfunc
     integer, dimension(:), allocatable :: ntype
-    integer, dimension(:), allocatable :: nfilecf
     integer, dimension(:), allocatable :: nion
     integer :: ncorrtime, ncorr, ncorrcall
     integer :: nrun,npereng,nstep,npervel,nperfri,nskip
@@ -20,8 +19,10 @@ MODULE MYMOD
     integer, allocatable, dimension(:,:) :: ncfin, ncfout, nthetainout, nthetaout, norm
     integer(1), allocatable, dimension(:,:,:) :: istorederfunc ! kind=1 really improves performance cause derfunc only contains 0 or 1.
     type FileWithPositions
-        character(len=80) :: name
+        character(len=80) :: name ! file name
+        integer :: nbSets ! number of velocity sets in file
     end type
+    type (FileWithPositions), allocatable, dimension(:) :: PosFile
 END MODULE MYMOD
 
 
@@ -31,7 +32,6 @@ PROGRAM CAGECF
     implicit none
 
     integer :: nummax, nbOfPositionFiles, ncnt, nfilecnt
-    character(len=80), allocatable, dimension(:) :: positionFileName
     integer :: i, j, k
     integer, parameter :: inputUnit = 10, positionsUnit = 11
     
@@ -45,11 +45,11 @@ PROGRAM CAGECF
     ncorrtime=1
     ncorrcall=0
 
-    ntot = sum(nfilecf)
+    ntot = sum(posFile(:)%nbSets)
     ncnt = 0
     nfilecnt = 1
 
-    open(inputUnit,file=positionFileName(1),status='old')
+    open(inputUnit,file=posFile(1)%name,status='old')
 
     loopj: do j=1,ntot
         call tellUserHowItAdvances (j, ntot)
@@ -70,11 +70,11 @@ PROGRAM CAGECF
             ncnt = ncnt+1
         endif
 
-        if (ncnt == nfilecf(nfilecnt)) then
-            if (nfilecnt == nbOfPositionFiles) exit loopj
+        if (ncnt == posFile(nfilecnt)%nbSets) then
+            if (nfilecnt == size(posFile)) exit loopj
             nfilecnt=nfilecnt+1
             close(inputUnit)
-            open(positionsUnit,file=positionFileName(nfilecnt),status='old')
+            open(positionsUnit,file=posFile(nfilecnt)%name,status='old')
             ncnt = 1
         endif
     end do loopj
@@ -266,16 +266,14 @@ PROGRAM CAGECF
             if( nskip < 1) stop 'STOP. nskip should be > 0'
             read(inputUnit,*)boxlen
             if( boxlen <= 0. ) stop 'STOP. box length should be strictly positive'
-            read(inputUnit,*) nbOfPositionFiles ! number of position files
-            if( nbOfPositionFiles < 1 ) stop 'STOP. nb of position files should be >=1'
-        
-            allocate( positionFileName(nbOfPositionFiles), nfilecf(nbOfPositionFiles) )
-        
-            do i=1,nbOfPositionFiles
-                read(inputUnit,'(a)') positionFileName(i)
-                read(inputUnit,*) nfilecf(i)
+            call readNumberOfPositionFiles (i)
+            allocate( PosFile(i) )
+
+            do i= 1, size(PosFile)
+                read(inputUnit,'(a)') posFile(i)%name
+                read(inputUnit,*) posFile(i)%nbSets
             end do
-        
+
             read(inputUnit,*)ncorr ! Time-span of the correlation function (in steps)
             allocate( istorederfunc(nummax,nummax,ncorr) )
             allocate( ncfin(nummax,0:ncorr) )
@@ -307,6 +305,12 @@ PROGRAM CAGECF
             do i = 1, imax
                 write(*,'(a)',advance='no')8
             end do
+        END SUBROUTINE
+        
+        SUBROUTINE readNumberOfPositionFiles (nbOfPositionFiles)
+            integer, intent(out) :: nbOfPositionFiles ! number of files in which positions may be found. Given in input file.
+            read(inputUnit,*) nbOfPositionFiles ! number of position files
+            if( nbOfPositionFiles < 1 ) stop 'STOP. nb of position files should be >=1'
         END SUBROUTINE
 
 END PROGRAM
