@@ -15,7 +15,7 @@ MODULE MYMOD
     integer :: ncorrtime, ncorr, ncorrcall
     integer :: nrun,npereng,nstep,npervel,nperfri,nskip
     integer :: num, ncut
-    integer :: nspecies, ncoordav,ntot
+    integer :: nspecies, ncoordav
     integer, allocatable, dimension(:,:) :: ncfin, ncfout, nthetainout, nthetaout, norm
     integer(1), allocatable, dimension(:,:,:) :: istorederfunc ! kind=1 really improves performance cause derfunc only contains 0 or 1.
     type FileWithPositions
@@ -31,7 +31,7 @@ PROGRAM CAGECF
     use iso_fortran_env, only: dp => real64
     implicit none
 
-    integer :: nummax, nbOfPositionFiles, ncnt, nfilecnt
+    integer :: nummax, ncnt, nfilecnt
     integer :: i, j, k
     integer, parameter :: inputUnit = 10, positionsUnit = 11
     
@@ -45,14 +45,13 @@ PROGRAM CAGECF
     ncorrtime=1
     ncorrcall=0
 
-    ntot = sum(posFile(:)%nbSets)
     ncnt = 0
     nfilecnt = 1
 
     open(inputUnit,file=posFile(1)%name,status='old')
 
-    loopj: do j=1,ntot
-        call tellUserHowItAdvances (j, ntot)
+    loopj: do j=1, sum(posFile(:)%nbSets) ! sum over all configurations in all position files
+        call tellUserHowItAdvances (j)
 
         if ((mod(j,nskip))==0) then
             do k=1,nummax
@@ -87,9 +86,6 @@ PROGRAM CAGECF
         !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         ! where cage correlation function is calculated
         SUBROUTINE IRCFCALC
-
-            use mymod
-            implicit none
 
             integer :: i, m, nt, imin, imax, kmin,kmax,mmin,mmax
             double precision :: xi, yi, zi, dx, dy, dz, dr
@@ -180,18 +176,16 @@ PROGRAM CAGECF
 
         END SUBROUTINE
 
-        !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
         ! where everything gets printed
         SUBROUTINE IRCFDUMP
-            use mymod
-            implicit none
-            double precision, allocatable, dimension(:) :: cfinouttot, cfouttot
+            real(dp), allocatable, dimension(:) :: cfinouttot, cfouttot
             integer :: i, j, ns
-            double precision :: coordav, time, t_norm
+            real(dp) :: averageCoordinationNb ! average coordination number
+            real(dp) :: time, t_norm
 
             allocate( cfinouttot(nspecies) )
             allocate( cfouttot(nspecies) )
-            coordav=dble(ncoordav*nskip)/dble(ntot*nion(2))
+            averageCoordinationNb = dble(ncoordav*nskip)/dble(sum(posFile(:)%nbSets)*nion(2))
 
             open (60,file='cagecfinout.dat')
             open (61,file='cagecfout.dat')
@@ -215,13 +209,9 @@ PROGRAM CAGECF
             close (60)
             close (61)
 
-            print*,
-            print*, 'Average coordination no. is',coordav
-            print*,
-            print*, '**** Finished. Correlation functions written in ****'
-            print*, 'cagecfout.dat   and   cagecfinout.dat'
-            print*,
-            print*,
+            print*, 'Average coordination no. is', averageCoordinationNb
+            print*, 'cagecfout.dat cagecfinout.dat      written'
+            print*, '**** Finished correctly ****'
 
         END SUBROUTINE
 
@@ -292,8 +282,10 @@ PROGRAM CAGECF
             close(inputUnit)
         END SUBROUTINE
 
-        SUBROUTINE tellUserHowItAdvances (j,maxi)
-            integer, intent(in) :: j, maxi
+        SUBROUTINE tellUserHowItAdvances (j)
+            integer, intent(in) :: j
+            integer :: maxi
+            maxi = sum(posFile(:)%nbSets)
             call eraserStandardOutputLastCharacters(100)
             write(*,'(a,i10,a,i10)',advance='no')'step',j,' /',maxi
             if( j == maxi ) call eraserStandardOutputLastCharacters(100)
