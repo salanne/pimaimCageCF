@@ -19,6 +19,9 @@ MODULE MYMOD
     integer :: nspecies, ncoordav,ntot
     integer, allocatable, dimension(:,:) :: ncfin, ncfout, nthetainout, nthetaout, norm
     integer(1), allocatable, dimension(:,:,:) :: istorederfunc ! kind=1 really improves performance cause derfunc only contains 0 or 1.
+    type FileWithPositions
+        character(len=80) :: name
+    end type
 END MODULE MYMOD
 
 
@@ -27,9 +30,10 @@ PROGRAM CAGECF
     use iso_fortran_env, only: dp => real64
     implicit none
 
-    integer :: nummax, nfiles, ncnt, nfilecnt
-    character(len=80), allocatable, dimension(:) :: posfile
+    integer :: nummax, nbOfPositionFiles, ncnt, nfilecnt
+    character(len=80), allocatable, dimension(:) :: positionFileName
     integer :: i, j, k
+    integer, parameter :: inputUnit = 10, positionsUnit = 11
     
     call checkInputFileExists( "cagecf.inpt")
     call openInputFile
@@ -45,14 +49,14 @@ PROGRAM CAGECF
     ncnt = 0
     nfilecnt = 1
 
-    open(10,file=posfile(1),status='old')
+    open(inputUnit,file=positionFileName(1),status='old')
 
     loopj: do j=1,ntot
         call tellUserHowItAdvances (j, ntot)
 
         if ((mod(j,nskip))==0) then
             do k=1,nummax
-                read(10,*) x(k), y(k), z(k)
+                read(inputUnit,*) x(k), y(k), z(k)
             end do
             call ircfcalc
             ncorrtime = mod(ncorrtime,ncorr)
@@ -61,16 +65,16 @@ PROGRAM CAGECF
             ncnt = ncnt+1
         else
             do k=1,nummax
-                read(10,*)
+                read(inputUnit,*)
             end do
             ncnt = ncnt+1
         endif
 
         if (ncnt == nfilecf(nfilecnt)) then
-            if (nfilecnt == nfiles) exit loopj
+            if (nfilecnt == nbOfPositionFiles) exit loopj
             nfilecnt=nfilecnt+1
-            close(10)
-            open(10,file=posfile(nfilecnt),status='old')
+            close(inputUnit)
+            open(positionsUnit,file=positionFileName(nfilecnt),status='old')
             ncnt = 1
         endif
     end do loopj
@@ -230,17 +234,17 @@ PROGRAM CAGECF
         
         SUBROUTINE openInputFile
             character(*), parameter :: inputFilename = 'cagecf.inpt' ! historical name
-            open(10, file=inputFilename)
+            open(inputUnit, file=inputFilename)
         END SUBROUTINE
         
         SUBROUTINE readInputFile
-            read(10,*) nspecies ! number of species
+            read(inputUnit,*) nspecies ! number of species
             if( nspecies < 1 ) stop 'STOP. nspecies should be higher than 0'
             allocate( nion(nspecies) )
         
             ! read number of atoms of each species
             do i= 1, size(nion)
-                read(10,*) nion(i)
+                read(inputUnit,*) nion(i)
                 if( nion(i)<1 ) stop 'STOP. nb of ions should be >0 for all ions'
             end do
         
@@ -258,21 +262,21 @@ PROGRAM CAGECF
                 num=num+nion(i)
             end do
         
-            read(10,*)nskip
+            read(inputUnit,*)nskip
             if( nskip < 1) stop 'STOP. nskip should be > 0'
-            read(10,*)boxlen
+            read(inputUnit,*)boxlen
             if( boxlen <= 0. ) stop 'STOP. box length should be strictly positive'
-            read(10,*)nfiles ! number of position files
-            if( nfiles < 1 ) stop 'STOP. nb of position files should be >=1'
+            read(inputUnit,*) nbOfPositionFiles ! number of position files
+            if( nbOfPositionFiles < 1 ) stop 'STOP. nb of position files should be >=1'
         
-            allocate( posfile(nfiles), nfilecf(nfiles) )
+            allocate( positionFileName(nbOfPositionFiles), nfilecf(nbOfPositionFiles) )
         
-            do i=1,nfiles
-                read(10,'(a)')posfile(i)
-                read(10,*)nfilecf(i)
+            do i=1,nbOfPositionFiles
+                read(inputUnit,'(a)') positionFileName(i)
+                read(inputUnit,*) nfilecf(i)
             end do
         
-            read(10,*)ncorr ! Time-span of the correlation function (in steps)
+            read(inputUnit,*)ncorr ! Time-span of the correlation function (in steps)
             allocate( istorederfunc(nummax,nummax,ncorr) )
             allocate( ncfin(nummax,0:ncorr) )
             allocate( ncfout(nummax,0:ncorr) )
@@ -280,14 +284,14 @@ PROGRAM CAGECF
             allocate( nthetaout(nummax,0:ncorr) )
             allocate( norm(nummax,0:ncorr) )
 
-            read(10,*)cutoff ! cutoff for bond
-            read(10,*)ncut ! number of ions for change in cage
-            read(10,*)dtime ! MD timestep
-            read(10,*)ndump ! number of configs between MD dumps
+            read(inputUnit,*)cutoff ! cutoff for bond
+            read(inputUnit,*)ncut ! number of ions for change in cage
+            read(inputUnit,*)dtime ! MD timestep
+            read(inputUnit,*)ndump ! number of configs between MD dumps
         END SUBROUTINE
         
         SUBROUTINE closeInputFile
-            close(10)
+            close(inputUnit)
         END SUBROUTINE
 
         SUBROUTINE tellUserHowItAdvances (j,maxi)
