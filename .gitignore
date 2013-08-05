@@ -1,3 +1,4 @@
+src/*.o
 .sconsign.dblite
 mymod.mod
 obj/
