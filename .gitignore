@@ -1,7 +1,8 @@
 src/*.o
 .sconsign.dblite
 mymod.mod
-obj/
+obj/*.o
+obj/*.mod
 pimaimCageCF
 cagecfinout.dat
 cagecfout.dat
