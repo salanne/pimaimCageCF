@@ -18,7 +18,7 @@ MODULE MYMOD
     integer :: nspecies, ncoordav,nanalyze,nelectrode
     integer, allocatable, dimension(:,:) :: ncfin, ncfout, nthetainout, nthetaout, norm
     integer(1), allocatable, dimension(:,:,:) :: istorederfunc ! kind=1 really improves performance cause derfunc only contains 0 or 1.
-    logical :: externalelectrode,dumpinfo
+    logical :: externalelectrode,dumpinfo,fullelectrode
     character(len=80) :: poselecfile
     type FileWithPositions
         character(len=80) :: name ! file name
@@ -99,17 +99,34 @@ PROGRAM CAGECF
         ! where cage correlation function is calculated
         SUBROUTINE IRCFCALC
 
-            integer :: i, m, nt, imin, imax, kmin,kmax,mmin,mmax
+            integer :: i, m, nt, imin, imax, kmin,kmax,mmin,mmax,kmin2,kmax2
             double precision :: xi, yi, zi, dx, dy, dz, dr
             integer(1) :: t_istorederfunc_ncorrtime, t_istorederfunc_m, t_mult
             integer(1), allocatable, dimension(:,:) :: i_istorederfunc
             integer :: tmp_ncfout_i_nt, tmp_ncfin_i_nt
+            logical :: attrib
 
             !derfunc = 0 ! init
             if(externalelectrode)then
-               imin=1
-               imax=nelectrode
-               if(dumpinfo)write(*,*)'The reference species is the electrode atoms'
+               if(fullelectrode)then
+                  if(nanalyze.eq.1)then
+                     if(dumpinfo)write(*,*)'We look at species number 1 - A'
+                     imin=1
+                     imax=nion(1)
+                  elseif(nanalyze.eq.2)then
+                     if(dumpinfo)write(*,*)'We look at species number 2 - Im1'
+                     imin=nion(1)+1
+                     imax=nion(1)+nion(2)
+                  elseif(nanalyze.eq.3)then
+                     if(dumpinfo)write(*,*)'We look at species number 3 - ACN'
+                     imin=nion(1)+nion(2)+1
+                     imax=nion(1)+nion(2)+nion(3)
+                  endif
+               else
+                  imin=1
+                  imax=nelectrode
+                  if(dumpinfo)write(*,*)'The reference species is the electrode atoms'
+               endif
             else
                if(nanalyze.eq.1)then
                   if(dumpinfo)write(*,*)'The program cannot calculate the anion-anion cagecf'
@@ -128,21 +145,29 @@ PROGRAM CAGECF
                endif
             endif
             if(externalelectrode)then
-               if(nanalyze.eq.1)then
-                  if(dumpinfo)write(*,*)'The species which escapes the cage is number 1 - A'
+               if(fullelectrode)then
                   kmin=1
-                  kmax=nion(1)
-               elseif(nanalyze.eq.2)then
-                  if(dumpinfo)write(*,*)'The species which escapes the cage is number 2 - Im'
-                  kmin=nion(1)+1
-                  kmax=nion(1)+nion(2)
-               elseif(nanalyze.eq.3)then
-                  if(dumpinfo)write(*,*)'The species which escapes the cage is number 3 - ACN'
-                  kmin=nion(1)+nion(2)+1
-                  kmax=nion(1)+nion(2)+nion(3)
+                  kmax=1
+                  kmin2=1
+                  kmax2=nelectrode
+                  if(dumpinfo)write(*,*)'We would like to know how fast it escapes from the surface'
                else
-                  if(dumpinfo)write(*,*)'Can work only with species 1, 2 or 3'
-                  stop
+                  if(nanalyze.eq.1)then
+                     if(dumpinfo)write(*,*)'The species which escapes the cage is number 1 - A'
+                     kmin=1
+                     kmax=nion(1)
+                  elseif(nanalyze.eq.2)then
+                     if(dumpinfo)write(*,*)'The species which escapes the cage is number 2 - Im'
+                     kmin=nion(1)+1
+                     kmax=nion(1)+nion(2)
+                  elseif(nanalyze.eq.3)then
+                     if(dumpinfo)write(*,*)'The species which escapes the cage is number 3 - ACN'
+                     kmin=nion(1)+nion(2)+1
+                     kmax=nion(1)+nion(2)+nion(3)
+                  else
+                     if(dumpinfo)write(*,*)'Can work only with species 1, 2 or 3'
+                     stop
+                  endif
                endif
             else
                if(dumpinfo)write(*,*)'The species which escapes the cage is the anion (1)'
@@ -154,30 +179,48 @@ PROGRAM CAGECF
             !allocate(derfunc(imin:imax,kmin:kmax), )
             if(.not.allocated(derfunc)) allocate(derfunc(imin:imax,kmin:kmax))
             derfunc=0
-
-            do i=imin,imax
-                if(externalelectrode)then
-                   xi=xelec(i) ; yi=yelec(i) ; zi=zelec(i)
-                else
-                   xi=x(i) ; yi=y(i) ; zi=z(i)
-                endif
-                do k=kmin,kmax
-                       dx=xi-x(k) ; dy=yi-y(k) ; dz=zi-z(k)
-                       dx=dx-boxlenx*int(dx*2.0d0/boxlenx)
-                       dy=dy-boxleny*int(dy*2.0d0/boxleny)
-                    if(.not.externalelectrode)then
+            if(fullelectrode)then
+               do i=imin,imax
+                  attrib=.false.
+                  xi=x(i) ; yi=y(i) ; zi=z(i)
+                  do k=kmin2,kmax2
+                     if(attrib)cycle
+                     dx=xi-xelec(k) ; dy=yi-yelec(k) ; dz=zi-zelec(k)
+                     dx=dx-boxlenx*int(dx*2.0d0/boxlenx)
+                     dy=dy-boxleny*int(dy*2.0d0/boxleny)
+                     dr = norm2((/dx,dy,dz/))
+                     if( dr <= cutoff ) then
+                        derfunc(i,1) = 1
+                        ncoordav = ncoordav+1
+                        attrib=.true.
+                     endif
+                  enddo
+               enddo
+            else
+               do i=imin,imax
+                  if(externalelectrode)then
+                     xi=xelec(i) ; yi=yelec(i) ; zi=zelec(i)
+                  else
+                     xi=x(i) ; yi=y(i) ; zi=z(i)
+                  endif
+                  do k=kmin,kmax
+                     dx=xi-x(k) ; dy=yi-y(k) ; dz=zi-z(k)
+                     dx=dx-boxlenx*int(dx*2.0d0/boxlenx)
+                     dy=dy-boxleny*int(dy*2.0d0/boxleny)
+                     if(.not.externalelectrode)then
                        ! apply minimum image convention
                        dz=dz-boxlenz*int(dz*2.0d0/boxlenz)
-                    endif
-                    dr = norm2((/dx,dy,dz/))
-                    if( dr <= cutoff ) then
+                     endif
+                     dr = norm2((/dx,dy,dz/))
+                     if( dr <= cutoff ) then
                         derfunc(i,k) = 1
                         ncoordav = ncoordav+1
-                    else
+                     else
                         derfunc(i,k) = 0
-                    endif
-                end do
-            end do
+                     endif
+                  end do
+               end do
+            endif
 
             mmin=1
             mmax=ncorrtime
@@ -249,9 +292,21 @@ PROGRAM CAGECF
             open (61,file='cagecfout.dat')
 
             if(externalelectrode)then
-               imin=1
-               imax=nelectrode
-               write(*,*)'The reference species is the electrode atoms'
+               if(fullelectrode)then
+                  if(nanalyze.eq.1)then
+                     imin=1
+                     imax=nion(1)
+                  elseif(nanalyze.eq.2)then
+                     imin=nion(1)+1
+                     imax=nion(1)+nion(2)
+                  elseif(nanalyze.eq.3)then
+                     imin=nion(1)+nion(2)+1
+                     imax=nion(1)+nion(2)+nion(3)
+                  endif
+               else
+                  imin=1
+                  imax=nelectrode
+               endif
             else
                if(nanalyze.eq.2)then
                   imin=nion(1)+1
@@ -274,8 +329,14 @@ PROGRAM CAGECF
                 time=dble(j)*dble(nskip)*dble(ndump)*dtime*2.418d-5
 
                 if(externalelectrode)then
-                   write(60,*)time,cfinouttot/dble(nelectrode)
-                   write(61,*)time,cfouttot/dble(nelectrode)
+                   if(fullelectrode)then
+                      ns=ntype(imin)
+                      write(60,*)time,cfinouttot/dble(nion(ns))
+                      write(61,*)time,cfouttot/dble(nion(ns))
+                   else
+                      write(60,*)time,cfinouttot/dble(nelectrode)
+                      write(61,*)time,cfouttot/dble(nelectrode)
+                   endif
                 else
                    ns=ntype(imin)
                    write(60,*)time,cfinouttot/dble(nion(ns))
@@ -332,11 +393,13 @@ PROGRAM CAGECF
             read(inputUnit,*)nskip
             if( nskip < 1) stop 'STOP. nskip should be > 0'
             read(inputUnit,*)nanalyze
+            fullelectrode=.false.
             read(inputUnit,*)externalelectrode
             if(externalelectrode)then
                read(inputUnit,'(a)') poselecfile
                read(inputUnit,*)nelectrode
                allocate( xelec(nelectrode), yelec(nelectrode), zelec(nelectrode) ) ! coordinates of electrode atoms
+               read(inputUnit,'(a)') fullelectrode
             endif
             read(inputUnit,*)boxlenx
             read(inputUnit,*)boxleny
