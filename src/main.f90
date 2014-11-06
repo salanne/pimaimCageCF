@@ -5,9 +5,9 @@
 MODULE MYMOD
     use iso_fortran_env, only: dp => real64
     implicit none
-    real(dp), allocatable, dimension(:) :: x, y, z
+    real(dp), allocatable, dimension(:) :: x, y, z,xelec,yelec,zelec
     real(dp) :: cutoff, width
-    real(dp) :: boxlen
+    real(dp) :: boxlenx,boxleny,boxlenz
     real(dp) :: dtime, ndump
     integer(1), dimension(:,:), allocatable :: derfunc
     integer, dimension(:), allocatable :: ntype
@@ -15,9 +15,11 @@ MODULE MYMOD
     integer :: ncorrtime, ncorr, ncorrcall
     integer :: nrun,npereng,nstep,npervel,nperfri,nskip
     integer :: num, ncut
-    integer :: nspecies, ncoordav
+    integer :: nspecies, ncoordav,nanalyze,nelectrode
     integer, allocatable, dimension(:,:) :: ncfin, ncfout, nthetainout, nthetaout, norm
     integer(1), allocatable, dimension(:,:,:) :: istorederfunc ! kind=1 really improves performance cause derfunc only contains 0 or 1.
+    logical :: externalelectrode,dumpinfo
+    character(len=80) :: poselecfile
     type FileWithPositions
         character(len=80) :: name ! file name
         integer :: nbSets ! number of velocity sets in file
@@ -33,7 +35,7 @@ PROGRAM CAGECF
 
     integer :: nummax, ncnt, nfilecnt
     integer :: i, j, k
-    integer, parameter :: inputUnit = 10, positionsUnit = 11
+    integer, parameter :: inputUnit = 10, positionsUnit = 11, inputUnit2 = 20
     
     call checkInputFileExists( "cagecf.inpt")
     call openInputFile
@@ -49,7 +51,14 @@ PROGRAM CAGECF
     nfilecnt = 1
 
     open(inputUnit,file=posFile(1)%name,status='old')
-
+    if(externalelectrode)then
+       open(inputUnit2,file=poselecfile,status='old')
+       do i=1,nelectrode
+          read(inputUnit2,*)xelec(i),yelec(i),zelec(i)
+       enddo
+    endif
+    
+    dumpinfo=.true.
     loopj: do j=1, sum(posFile(:)%nbSets) ! sum over all configurations in all position files
         call tellUserHowItAdvances (j)
 
@@ -79,6 +88,9 @@ PROGRAM CAGECF
     end do loopj
     
     deallocate(istorederfunc, ncfin, ncfout, x, y, z)
+    if(externalelectrode)then
+       deallocate(xelec,yelec,zelec)
+    endif
     call ircfdump
 
     CONTAINS
@@ -94,23 +106,69 @@ PROGRAM CAGECF
             integer :: tmp_ncfout_i_nt, tmp_ncfin_i_nt
 
             !derfunc = 0 ! init
-            imin=nion(1)+1
-            imax=nion(1)+nion(2)
-            kmin=1
-            kmax=nion(1)
+            if(externalelectrode)then
+               imin=1
+               imax=nelectrode
+               if(dumpinfo)write(*,*)'The reference species is the electrode atoms'
+            else
+               if(nanalyze.eq.1)then
+                  if(dumpinfo)write(*,*)'The program cannot calculate the anion-anion cagecf'
+                  stop
+               elseif(nanalyze.eq.2)then
+                  if(dumpinfo)write(*,*)'The reference species is cation 1'
+                  imin=nion(1)+1
+                  imax=nion(1)+nion(2)
+               elseif(nanalyze.eq.3)then
+                  if(dumpinfo)write(*,*)'The reference species is cation 2'
+                  imin=nion(1)+nion(2)+1
+                  imax=nion(1)+nion(2)+nion(3)
+               else
+                  if(dumpinfo)write(*,*)'The program cannot calculate the cagecf for cation 3 and above'
+                  stop
+               endif
+            endif
+            if(externalelectrode)then
+               if(nanalyze.eq.1)then
+                  if(dumpinfo)write(*,*)'The species which escapes the cage is number 1 - A'
+                  kmin=1
+                  kmax=nion(1)
+               elseif(nanalyze.eq.2)then
+                  if(dumpinfo)write(*,*)'The species which escapes the cage is number 2 - Im'
+                  kmin=nion(1)+1
+                  kmax=nion(1)+nion(2)
+               elseif(nanalyze.eq.3)then
+                  if(dumpinfo)write(*,*)'The species which escapes the cage is number 3 - ACN'
+                  kmin=nion(1)+nion(2)+1
+                  kmax=nion(1)+nion(2)+nion(3)
+               else
+                  if(dumpinfo)write(*,*)'Can work only with species 1, 2 or 3'
+                  stop
+               endif
+            else
+               if(dumpinfo)write(*,*)'The species which escapes the cage is the anion (1)'
+               kmin=1
+               kmax=nion(1)
+            endif
+            dumpinfo=.false.
 
             !allocate(derfunc(imin:imax,kmin:kmax), )
             if(.not.allocated(derfunc)) allocate(derfunc(imin:imax,kmin:kmax))
             derfunc=0
 
             do i=imin,imax
-                xi=x(i) ; yi=y(i) ; zi=z(i)
+                if(externalelectrode)then
+                   xi=xelec(i) ; yi=yelec(i) ; zi=zelec(i)
+                else
+                   xi=x(i) ; yi=y(i) ; zi=z(i)
+                endif
                 do k=kmin,kmax
-                    dx=xi-x(k) ; dy=yi-y(k) ; dz=zi-z(k)
-                    ! apply minimum image convention
-                    dx=dx-boxlen*int(dx*2.0d0/boxlen)
-                    dy=dy-boxlen*int(dy*2.0d0/boxlen)
-                    dz=dz-boxlen*int(dz*2.0d0/boxlen)
+                       dx=xi-x(k) ; dy=yi-y(k) ; dz=zi-z(k)
+                       dx=dx-boxlenx*int(dx*2.0d0/boxlenx)
+                       dy=dy-boxleny*int(dy*2.0d0/boxleny)
+                    if(.not.externalelectrode)then
+                       ! apply minimum image convention
+                       dz=dz-boxlenz*int(dz*2.0d0/boxlenz)
+                    endif
                     dr = norm2((/dx,dy,dz/))
                     if( dr <= cutoff ) then
                         derfunc(i,k) = 1
@@ -178,32 +236,51 @@ PROGRAM CAGECF
 
         ! where everything gets printed
         SUBROUTINE IRCFDUMP
-            real(dp), allocatable, dimension(:) :: cfinouttot, cfouttot
-            integer :: i, j, ns
+            real(dp) :: cfinouttot, cfouttot
+            integer :: i, j, ns,imin,imax
             real(dp) :: averageCoordinationNb ! average coordination number
             real(dp) :: time, t_norm
 
-            allocate( cfinouttot(nspecies) )
-            allocate( cfouttot(nspecies) )
+!           allocate( cfinouttot(nspecies) )
+!           allocate( cfouttot(nspecies) )
             averageCoordinationNb = dble(ncoordav*nskip)/dble(sum(posFile(:)%nbSets)*nion(2))
 
             open (60,file='cagecfinout.dat')
             open (61,file='cagecfout.dat')
 
+            if(externalelectrode)then
+               imin=1
+               imax=nelectrode
+               write(*,*)'The reference species is the electrode atoms'
+            else
+               if(nanalyze.eq.2)then
+                  imin=nion(1)+1
+                  imax=nion(1)+nion(2)
+               elseif(nanalyze.eq.3)then
+                  imin=nion(1)+nion(2)+1
+                  imax=nion(1)+nion(2)+nion(3)
+               endif
+            endif
             do j=0,ncorr-1
                 cfinouttot = 0.0d0
                 cfouttot = 0.0d0
-                do i=nion(1)+1,nion(1)+nion(2)
-                    ns=ntype(i)
+                do i=imin,imax
                     t_norm = dble(norm(i,j))
                     if( t_norm/=0 ) then
-                        cfouttot(ns)=cfouttot(ns)+dble(nthetaout(i,j)) / t_norm
-                        cfinouttot(ns)=cfinouttot(ns)+dble(nthetainout(i,j)) / t_norm
+                        cfouttot=cfouttot+dble(nthetaout(i,j)) / t_norm
+                        cfinouttot=cfinouttot+dble(nthetainout(i,j)) / t_norm
                     end if
                 end do
                 time=dble(j)*dble(nskip)*dble(ndump)*dtime*2.418d-5
-                write(60,*)time,cfinouttot(ns)/dble(nion(ns))
-                write(61,*)time,cfouttot(ns)/dble(nion(ns))
+
+                if(externalelectrode)then
+                   write(60,*)time,cfinouttot/dble(nelectrode)
+                   write(61,*)time,cfouttot/dble(nelectrode)
+                else
+                   ns=ntype(imin)
+                   write(60,*)time,cfinouttot/dble(nion(ns))
+                   write(61,*)time,cfouttot/dble(nion(ns))
+                endif
             end do
 
             close (60)
@@ -254,8 +331,17 @@ PROGRAM CAGECF
         
             read(inputUnit,*)nskip
             if( nskip < 1) stop 'STOP. nskip should be > 0'
-            read(inputUnit,*)boxlen
-            if( boxlen <= 0. ) stop 'STOP. box length should be strictly positive'
+            read(inputUnit,*)nanalyze
+            read(inputUnit,*)externalelectrode
+            if(externalelectrode)then
+               read(inputUnit,'(a)') poselecfile
+               read(inputUnit,*)nelectrode
+               allocate( xelec(nelectrode), yelec(nelectrode), zelec(nelectrode) ) ! coordinates of electrode atoms
+            endif
+            read(inputUnit,*)boxlenx
+            read(inputUnit,*)boxleny
+            read(inputUnit,*)boxlenz
+            if( boxlenx <= 0. ) stop 'STOP. box length should be strictly positive'
             call readNumberOfPositionFiles (i)
             allocate( PosFile(i) )
 
