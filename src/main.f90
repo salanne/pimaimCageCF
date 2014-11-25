@@ -399,7 +399,7 @@ PROGRAM CAGECF
                read(inputUnit,'(a)') poselecfile
                read(inputUnit,*)nelectrode
                allocate( xelec(nelectrode), yelec(nelectrode), zelec(nelectrode) ) ! coordinates of electrode atoms
-               read(inputUnit,'(a)') fullelectrode
+               read(inputUnit,*) fullelectrode
             endif
             read(inputUnit,*)boxlenx
             read(inputUnit,*)boxleny
