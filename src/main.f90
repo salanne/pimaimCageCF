@@ -15,10 +15,10 @@ MODULE MYMOD
     integer :: ncorrtime, ncorr, ncorrcall
     integer :: nrun,npereng,nstep,npervel,nperfri,nskip
     integer :: num, ncut
-    integer :: nspecies, ncoordav,nanalyze,nelectrode
+    integer :: nspecies, ncoordav,nzerocoord,nanalyze,nelectrode
     integer, allocatable, dimension(:,:) :: ncfin, ncfout, nthetainout, nthetaout, norm
     integer(1), allocatable, dimension(:,:,:) :: istorederfunc ! kind=1 really improves performance cause derfunc only contains 0 or 1.
-    logical :: externalelectrode,dumpinfo,fullelectrode
+    logical :: externalelectrode,dumpinfo,fullelectrode,ionreference
     character(len=80) :: poselecfile
     type FileWithPositions
         character(len=80) :: name ! file name
@@ -46,6 +46,7 @@ PROGRAM CAGECF
     ncoordav = 0
     ncorrtime=1
     ncorrcall=0
+    nzerocoord=0
 
     ncnt = 0
     nfilecnt = 1
@@ -99,7 +100,7 @@ PROGRAM CAGECF
         ! where cage correlation function is calculated
         SUBROUTINE IRCFCALC
 
-            integer :: i, m, nt, imin, imax, kmin,kmax,mmin,mmax,kmin2,kmax2
+            integer :: i, m, nt, imin, imax, kmin,kmax,mmin,mmax,kmin2,kmax2,ncoordloc
             double precision :: xi, yi, zi, dx, dy, dz, dr
             integer(1) :: t_istorederfunc_ncorrtime, t_istorederfunc_m, t_mult
             integer(1), allocatable, dimension(:,:) :: i_istorederfunc
@@ -109,6 +110,20 @@ PROGRAM CAGECF
             !derfunc = 0 ! init
             if(externalelectrode)then
                if(fullelectrode)then
+                  if(nanalyze.eq.1)then
+                     if(dumpinfo)write(*,*)'We look at species number 1 - A'
+                     imin=1
+                     imax=nion(1)
+                  elseif(nanalyze.eq.2)then
+                     if(dumpinfo)write(*,*)'We look at species number 2 - Im1'
+                     imin=nion(1)+1
+                     imax=nion(1)+nion(2)
+                  elseif(nanalyze.eq.3)then
+                     if(dumpinfo)write(*,*)'We look at species number 3 - ACN'
+                     imin=nion(1)+nion(2)+1
+                     imax=nion(1)+nion(2)+nion(3)
+                  endif
+               elseif(ionreference)then
                   if(nanalyze.eq.1)then
                      if(dumpinfo)write(*,*)'We look at species number 1 - A'
                      imin=1
@@ -151,6 +166,9 @@ PROGRAM CAGECF
                   kmin2=1
                   kmax2=nelectrode
                   if(dumpinfo)write(*,*)'We would like to know how fast it escapes from the surface'
+               elseif(ionreference)then
+                  kmin=1
+                  kmax=nelectrode
                else
                   if(nanalyze.eq.1)then
                      if(dumpinfo)write(*,*)'The species which escapes the cage is number 1 - A'
@@ -195,6 +213,27 @@ PROGRAM CAGECF
                         attrib=.true.
                      endif
                   enddo
+               enddo
+            elseif(ionreference)then
+               do i=imin,imax
+                  xi=x(i) ; yi=y(i) ; zi=z(i)
+                  ncoordloc=0
+                  do k=kmin,kmax
+                     dx=xi-xelec(k) ; dy=yi-yelec(k) ; dz=zi-zelec(k)
+                     dx=dx-boxlenx*int(dx*2.0d0/boxlenx)
+                     dy=dy-boxleny*int(dy*2.0d0/boxleny)
+                     dr = norm2((/dx,dy,dz/))
+                     if( dr <= cutoff ) then
+                        derfunc(i,k) = 1
+                        ncoordav = ncoordav+1
+                        ncoordloc=ncoordloc+1
+                     else
+                        derfunc(i,k) = 0
+                     endif
+                  enddo
+                  if(ncoordloc.eq.0)then
+                     nzerocoord=nzerocoord+1
+                  endif
                enddo
             else
                do i=imin,imax
@@ -280,9 +319,9 @@ PROGRAM CAGECF
         ! where everything gets printed
         SUBROUTINE IRCFDUMP
             real(dp) :: cfinouttot, cfouttot
-            integer :: i, j, ns,imin,imax
+            integer :: i, j, ns,imin,imax,ncorrec
             real(dp) :: averageCoordinationNb ! average coordination number
-            real(dp) :: time, t_norm
+            real(dp) :: time, t_norm,alpha
 
 !           allocate( cfinouttot(nspecies) )
 !           allocate( cfouttot(nspecies) )
@@ -293,6 +332,17 @@ PROGRAM CAGECF
 
             if(externalelectrode)then
                if(fullelectrode)then
+                  if(nanalyze.eq.1)then
+                     imin=1
+                     imax=nion(1)
+                  elseif(nanalyze.eq.2)then
+                     imin=nion(1)+1
+                     imax=nion(1)+nion(2)
+                  elseif(nanalyze.eq.3)then
+                     imin=nion(1)+nion(2)+1
+                     imax=nion(1)+nion(2)+nion(3)
+                  endif
+               elseif(ionreference)then
                   if(nanalyze.eq.1)then
                      imin=1
                      imax=nion(1)
@@ -322,6 +372,7 @@ PROGRAM CAGECF
                 do i=imin,imax
                     t_norm = dble(norm(i,j))
                     if( t_norm/=0 ) then
+                        if((j.eq.19).and.(nthetaout(i,j).ne.0))write(11,*)i,nthetaout(i,j),t_norm
                         cfouttot=cfouttot+dble(nthetaout(i,j)) / t_norm
                         cfinouttot=cfinouttot+dble(nthetainout(i,j)) / t_norm
                     end if
@@ -331,6 +382,15 @@ PROGRAM CAGECF
                 if(externalelectrode)then
                    if(fullelectrode)then
                       ns=ntype(imin)
+                      write(60,*)time,cfinouttot/dble(nion(ns))
+                      write(61,*)time,cfouttot/dble(nion(ns))
+                   elseif(ionreference)then
+                      ns=ntype(imin)
+                      ncorrec=nzerocoord/(sum(posFile(:)%nbSets)/nskip)
+                      alpha=dble(nion(ns))/dble(nion(ns)-ncorrec)
+                      write(6,*)nion(ns),ncorrec,alpha
+!                      write(60,*)time,alpha*cfinouttot/dble(nion(ns))+1.0-alpha
+!                      write(61,*)time,alpha*cfouttot/dble(nion(ns))+1.0-alpha
                       write(60,*)time,cfinouttot/dble(nion(ns))
                       write(61,*)time,cfouttot/dble(nion(ns))
                    else
@@ -394,12 +454,14 @@ PROGRAM CAGECF
             if( nskip < 1) stop 'STOP. nskip should be > 0'
             read(inputUnit,*)nanalyze
             fullelectrode=.false.
+            ionreference=.false.
             read(inputUnit,*)externalelectrode
             if(externalelectrode)then
                read(inputUnit,'(a)') poselecfile
                read(inputUnit,*)nelectrode
                allocate( xelec(nelectrode), yelec(nelectrode), zelec(nelectrode) ) ! coordinates of electrode atoms
                read(inputUnit,*) fullelectrode
+               read(inputUnit,*) ionreference
             endif
             read(inputUnit,*)boxlenx
             read(inputUnit,*)boxleny
